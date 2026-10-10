@@ -95,7 +95,14 @@ a file whose only plan is a cycle). The plan list's `structural_total` leaves
 Break Cycle out, matching the opportunities; `by_type` still counts it.
 
 Names are never invented. A suggested helper or file name is `null` when nothing
-in the code anchors one.
+in the code anchors one. An Extract Method helper is named, in order, from a
+`timed(..., "label")` stage label on the span, a short banner comment directly
+above it, or its single output value as `compute_<value>`. The `compute_` form is
+used only for a span with no outside effects: one that awaits, calls something
+for its effect (printing, logging, I/O) or writes through a name it did not
+create gets no `compute_` name. Names follow the file's casing, and a name that a
+function in the same scope (the class, or the module) already uses is dropped,
+so a `null` name means you name the helper.
 
 An empty list means no detector found work that clears its gates. It does not mean
 the code needs no attention: check the findings in
