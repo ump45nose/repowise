@@ -183,6 +183,12 @@ UNRELIABLE_CALL_ORIGINS = UNRELIABLE_EXECUTION_ORIGINS
 # suite cannot produce an unbounded intermediate.
 MAX_TESTS_PER_TARGET = 50
 
+# A hub is a module most of the code imports: fan-in above this, or in the top
+# share of files by fan-in. A test reaching a file only through one is reaching
+# the hub, so a walk told to avoid hubs does not pass reach through them.
+HUB_MIN_FAN_IN = 50
+HUB_TOP_SHARE = 0.01
+
 # Which tier answered. The CLI prints this so a reader can tell "this test runs
 # into the file" from the weaker "this test imports it".
 # ``name-match`` is weaker still: a test named for the file, with no edge.
@@ -201,6 +207,7 @@ __all__ = [
     "direct_dependents",
     "files_reached_by_tests",
     "files_with_paired_tests",
+    "hub_files",
     "imported_names_by_test",
     "load_test_files",
     "rank_tests",
@@ -478,6 +485,31 @@ async def unscanned_test_files(session: AsyncSession, repo_id: str) -> set[str]:
     return {node_id for (node_id,) in res.all() if is_judged_test(node_id)}
 
 
+async def hub_files(session: AsyncSession, repo_id: str) -> frozenset[str]:
+    """Repository files that are hubs by stored fan-in (``graph_metrics.in_degree``).
+
+    Fan-in above :data:`HUB_MIN_FAN_IN`, or within the top :data:`HUB_TOP_SHARE`
+    of the repository's own non-test files. Third-party modules and tests are
+    never hubs: neither carries the repository's code between a test and a file.
+    """
+    rows = await session.execute(
+        text(
+            "SELECT m.node_id, m.in_degree FROM graph_metrics m "
+            "JOIN graph_nodes n ON n.repository_id = m.repository_id AND n.node_id = m.node_id "
+            "WHERE m.repository_id = :repo_id AND n.node_type = 'file' "
+            "AND n.is_test = :not_test AND m.node_id NOT LIKE 'external:%'"
+        ),
+        {"repo_id": repo_id, "not_test": False},
+    )
+    ranked = sorted(((int(fan_in or 0), path) for path, fan_in in rows), reverse=True)
+    top = int(len(ranked) * HUB_TOP_SHARE)
+    return frozenset(
+        path
+        for index, (fan_in, path) in enumerate(ranked)
+        if fan_in > 0 and (index < top or fan_in > HUB_MIN_FAN_IN)
+    )
+
+
 async def dependency_path(
     session: AsyncSession, repo_id: str, source: str, targets: Collection[str], max_depth: int = 64
 ) -> list[str]:
@@ -547,6 +579,7 @@ async def tests_reaching_by_tier(
     import_depth: int = DEFAULT_MAX_DEPTH,
     symbol_seeds: Mapping[str, Collection[str]] | None = None,
     test_files: set[str] | None = None,
+    avoid: Collection[str] = frozenset(),
 ) -> dict[str, ReachedBy]:
     """:func:`tests_reaching`, also saying which tier answered each target.
 
@@ -559,6 +592,10 @@ async def tests_reaching_by_tier(
     declares. A target it does not name, or names with no ids, keeps the
     ``defines`` lookup, and the
     import tier stays file-level either way.
+
+    *avoid* names files the call walk does not pass reach through
+    (:func:`hub_files`), except for a target's own symbols. The import tier is
+    one hop, so it never passes through anything.
 
     The call walk runs first; the import walk is then seeded with only the
     targets it left unanswered, so the weaker tier never speaks over the
@@ -584,7 +621,7 @@ async def tests_reaching_by_tier(
     out: dict[str, ReachedBy] = {}
     if call_depth >= 1:
         found = await _call_reaching(
-            session, repo_id, seeds, test_files, call_depth, symbol_seeds=symbol_seeds
+            session, repo_id, seeds, test_files, call_depth, symbol_seeds=symbol_seeds, avoid=avoid
         )
         for seed, reach in found.items():
             ordered = tuple(rank_tests(seed.split("::", 1)[0], reach))
@@ -612,6 +649,7 @@ async def _call_reaching(
     *,
     symbol_seeds: Mapping[str, Collection[str]] | None = None,
     strict: bool = False,
+    avoid: Collection[str] = frozenset(),
 ) -> dict[str, dict[str, ReachDistance]]:
     """Tests that can execute into each seed file, walking call edges backwards.
 
@@ -683,6 +721,11 @@ async def _call_reaching(
                 # A test is a leaf. Walking through one would let "test A calls
                 # shared helper B" drag B's unrelated targets in.
                 continue
+            if owner in avoid:
+                # A hub carries on only the seeds it declares itself.
+                carried = {s: d for s, d in carried.items() if s.split("::", 1)[0] == owner}
+                if not carried:
+                    continue
             known = origins.setdefault(caller, {})
             closer = {
                 seed: distance + 1
@@ -708,6 +751,7 @@ async def reach_into_symbols(
     test_files: set[str],
     *,
     max_depth: int = DEFAULT_CALL_DEPTH,
+    avoid: Collection[str] = frozenset(),
 ) -> dict[str, dict[str, ReachDistance]]:
     """Tests that call into each symbol id, keyed by the symbol, with their hops.
 
@@ -726,6 +770,7 @@ async def reach_into_symbols(
         max_depth,
         symbol_seeds={symbol: (symbol,) for symbol in seeds},
         strict=True,
+        avoid=avoid,
     )
 
 
