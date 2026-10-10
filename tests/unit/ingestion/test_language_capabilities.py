@@ -66,7 +66,7 @@ class TestParityGoldens:
 
     def test_test_infixes_match_historical_set(self) -> None:
         # `.test-d.` is the TypeScript type-test infix (`*.test-d.ts`).
-        assert set(REGISTRY.test_infixes()) == {".test.", ".spec.", ".test-d."}
+        assert set(REGISTRY.test_infixes()) == {".test.", ".spec.", ".test-d.", ".e2e."}
 
     def test_test_fixture_stems_match_historical_set(self) -> None:
         assert frozenset(
