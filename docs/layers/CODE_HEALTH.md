@@ -248,8 +248,19 @@ one state: `plan_ready` (a proven fix strategy), `advisory` (a strategy with
 unproven prerequisites), `investigate` (no supported strategy) or `expected` (the
 repetition is real and nothing should change, such as deleting N files, or the
 function that holds it is switched off by a constant flag, reason `gated_off`). The
-default queue holds production `plan_ready` and `advisory` opportunities, ranked by
-cost first; state only breaks ties. Everything left out is counted by reason.
+default queue holds production `plan_ready` and `advisory` opportunities whose cost
+is measured, ranked by cost first; state only breaks ties. Everything left out is
+counted by reason.
+
+An opportunity leads (the dashboard's performance lead, the top of Fix first) only
+when its cost is proven to matter: its loop grows with the data, it is a per-call
+cost an entry point reaches, or its shape grows by itself (an unbounded goroutine
+loop, a cartesian join). A loop whose size nothing measured is `unproven`: it never
+leads, ranks no higher than a bounded loop, sits in Fix first as a `later` item,
+and leaves the performance list under the reason `unmeasured_cost`. Ask for it with
+the `proof=unproven` filter; the `proof` facet and summary count both. A cause with
+no loop (an unbounded read reduced in memory) is judged per call: it leads when an
+entry point reaches it.
 
 Performance analysis covers Python, TypeScript/JavaScript (including Vue and Svelte
 scripts), Java, Go, C# (including Razor), Rust, Kotlin, Scala, Ruby, C++, Dart and

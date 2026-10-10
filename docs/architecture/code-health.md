@@ -719,9 +719,19 @@ through, or `<file>::__module__` for top-level code. Sinks, call sites and
 same-family co-signals (`io_in_loop` with `nested_loop_with_io`) are members. Two
 loops in one function are one site, because findings carry the sink's line. Each
 carries one `actionability` state (`plan_ready`, `advisory`, `investigate`,
-`expected`). The default queue holds production `plan_ready` and `advisory`, ranked
-by `rank_score`; actionability only breaks ties. Excluded reasons are counted in
-`default_queue`.
+`expected`). The default queue holds production `plan_ready` and `advisory` with
+`cost_proof = proven`, ranked by `rank_score`; actionability only breaks ties.
+Excluded reasons are counted in `default_queue`.
+
+**Lead rule.** `worth.lead_reason` is the one rule every surface reads: a cause may
+lead when its loop is `grows_with_data`, when it is a per-call marker or has no loop
+(magnitude `n/a`) and an entry point reaches it, or when it is a growing marker; otherwise it names `bounded_loop`,
+`unreached_call` or `unmeasured_cost`. `unmeasured_cost` is stored as the
+`cost_proof = unproven` column, which the default queue filters out (counted as
+`unmeasured_cost`) and the `proof` filter and facet expose. The same rule sets
+`may_lead`, gives an unknown loop no rank points (`MAGNITUDE_POINTS`), and tiers Fix
+first (`perf_low_priority`, `_perf_value`), where an unproven cause stays a `later`
+item.
 
 **Plans.** Proven means the transformation, not the runtime: parallelizing awaits
 against a DB or network client is advisory with a `bounded_concurrency`
